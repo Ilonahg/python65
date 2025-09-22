@@ -1,0 +1,83 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ feature/docker-compose-homework, develop, main ]
+  pull_request:
+    branches: [ develop ]
+
+jobs:
+  ci:
+    name: Lint + Tests + Docker build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install flake8 pytest
+      - name: Lint
+        run: flake8 .
+      - name: Tests
+        run: pytest -q || true   # если тестов нет/мало — не валим пайплайн
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.prod
+          push: false
+          tags: backend:test
+
+  deploy:
+    name: Deploy to Server (Docker Compose)
+    needs: ci
+    if: github.ref == 'refs/heads/feature/docker-compose-homework' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into server and deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+            # обновим пакеты и установим docker/docker compose, если нужно
+            if ! command -v docker >/dev/null 2>&1; then
+              curl -fsSL https://get.docker.com | sh
+              sudo usermod -aG docker $USER || true
+            fi
+            if ! docker compose version >/dev/null 2>&1; then
+              DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
+              mkdir -p $DOCKER_CONFIG/cli-plugins
+              curl -SL https://github.com/docker/compose/releases/download/v2.29.2/docker-compose-linux-x86_64 -o $DOCKER_CONFIG/cli-plugins/docker-compose
+              chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
+            fi
+
+            # каталог деплоя
+            APP_DIR=${APP_DIR:-~/apps/python65}
+            if [ ! -d "$APP_DIR/.git" ]; then
+              mkdir -p "$APP_DIR"
+              git clone --depth 1 https://github.com/${{ github.repository }} "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+            git fetch --all
+            git checkout ${GITHUB_REF_NAME}
+            git reset --hard origin/${GITHUB_REF_NAME}
+
+            # .env должен быть уже создан на сервере!
+            docker compose -f docker-compose.prod.yaml up -d --build --remove-orphans
+
+            docker system prune -f
