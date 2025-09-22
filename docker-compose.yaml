@@ -1,0 +1,72 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: bash /docker/entrypoint.sh
+    env_file: [.env]
+    ports:
+      - "${BACKEND_PORT}:8000"
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    volumes:
+      - ./:/app
+    restart: unless-stopped
+
+  celery:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A ${DJANGO_PROJECT} worker -l info
+    env_file: [.env]
+    depends_on:
+      backend:
+        condition: service_started
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    volumes:
+      - ./:/app
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A ${DJANGO_PROJECT} beat -l info
+    env_file: [.env]
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    volumes:
+      - ./:/app
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    env_file: [.env]
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    env_file: [.env]
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:

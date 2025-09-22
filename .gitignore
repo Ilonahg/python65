@@ -1,0 +1,30 @@
+@'
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.log
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Django
+static/
+media/
+*.sqlite3
+
+# Secrets
+.env
+*.env
+
+# IDE
+.idea/
+.vscode/
+
+# Docker bind mounts
+pg_data/
+redis_data/
+'@ | Set-Content .gitignore -Encoding UTF8
